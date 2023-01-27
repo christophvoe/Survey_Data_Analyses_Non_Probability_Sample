@@ -1,0 +1,106 @@
+---
+title: "Contact_matrices"
+author: "Christoph Völtzke"
+date: "2023-01-27"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages, data and functions
+```{r, results = "hide", message=FALSE, warning=FALSE}
+library(readr)
+library(survey)
+library(tidyverse)
+library(covidregionaldata)
+library(socialmixr)
+library(ggplot2)
+library(data.table)
+```
+
+```{r, results = "hide", message=FALSE, warning=FALSE}
+complete.data <- read_csv("Data/Data_processed/full_data.csv")
+clean_cont <-read_csv("Data/Data_processed/clean_cont.csv")
+clean_part <-read_csv("Data/Data_processed/clean_part.csv")
+```
+
+```{r}
+source("Functions/contact_matrices.R")
+```
+
+
+## Data prep for plotting
+```{r, warning=FALSE, message=FALSE}
+# Matrices - contacts per day
+
+# Plot over whole time Comix data
+comixdata <- survey(complete.data, clean_cont)
+
+contactcomix <- contact_matrix(comixdata, age.limits = c(18, 24, 44, 64, 120))
+
+# Initial plot POLYMOD 
+contactUK <- contact_matrix(polymod, countries = "United Kingdom", age.limits = c(18, 24, 44, 64, 120))
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Matrices - contacts per day (Type of contact)
+# Only physical contact for Comix data
+phys_contactcomix <- clean_cont %>%
+  filter(phys_contact == 1)
+phys_comixdata <- survey(complete.data, phys_contactcomix)
+phys_contactcomix <- contact_matrix(phys_comixdata,age.limits = c(18, 24, 44, 64, 120))
+
+# Only physical contact for Polymod data
+phys_contactpoly <- polymod$contacts %>%
+  filter(phys_contact == 1)
+phys_poly <- survey(polymod$participants, phys_contactpoly)
+phys_contactUK <- contact_matrix(phys_poly, countries = "United Kingdom", age.limits = c(18, 24, 44, 64, 120))
+```
+```{r, warning=FALSE, message=FALSE}
+# Data prep - Matrices - contacts per day (Time periods)
+Period_1 <- complete.data %>%
+  filter(sday_id >= "2020.03.23" & sday_id <= "2020.06.03")
+
+Period_2 <- complete.data %>%
+  filter(sday_id >= "2020.06.24" & sday_id <= "2020.07.29")
+
+Period_3 <- complete.data %>%
+  filter(sday_id >= "2020.07.30" & sday_id <= "2020.08.08")
+
+# Period 1
+period1_comixdata <- survey(Period_1, clean_cont)
+period1_contactcomix <- contact_matrix(period1_comixdata, age.limits = c(18, 24, 44, 64, 120))
+
+# Period 2
+period2_comixdata <- survey(Period_2, clean_cont)
+period2_contactcomix <- contact_matrix(period2_comixdata, age.limits = c(18, 24, 44, 64, 120))
+
+#Period 3
+period3_comixdata <- survey(Period_3, clean_cont)
+period3_contactcomix <- contact_matrix(period3_comixdata, age.limits = c(18, 24, 44, 64, 120))
+```
+
+```{r, warning=FALSE}
+gplot1 <- contactmatrices(contactcomix, "Social contact CoMix")
+gplot2 <- contactmatrices(contactUK, "Social contact POLYMOD")
+compare_plot <- cowplot::plot_grid(gplot1,gplot2, labels = "AUTO")
+compare_plot
+```
+
+```{r}
+gplot3 <- contactmatrices(phys_contactcomix, "Physical contact CoMix")
+gplot4 <- contactmatrices(phys_contactUK, "Physical contact POLYMOD")
+compare_plot1 <- cowplot::plot_grid(gplot3,gplot4, gplot1, gplot2, labels = "AUTO")
+compare_plot1
+```
+
+```{r}
+gplot5 <- contactmatrices(period1_contactcomix, "Lockdown Social contact CoMix")
+gplot6 <- contactmatrices(period2_contactcomix, "Lockdown easing Social contact CoMix")
+gplot7 <- contactmatrices(period3_contactcomix, "Reduced restrictions Social contact CoMix")
+
+compare_plot2 <- cowplot::plot_grid(gplot2, gplot5,gplot6,gplot7, labels = "AUTO")
+compare_plot2
+```

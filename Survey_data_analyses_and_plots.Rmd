@@ -1,0 +1,223 @@
+---
+title: "Survey_data_analyses"
+author: "Christoph Völtzke"
+date: "2023-01-26"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, results = "hide", message=FALSE, warning=FALSE}
+library(readr)
+library(survey)
+library(tidyverse)
+library(covidregionaldata)
+library(socialmixr)
+library(ggplot2)
+```
+
+```{r, results = "hide", message=FALSE, warning=FALSE}
+complete.data <- read_csv("Data_processed/full_data.csv")
+load("uk_pop.Rdata")
+```
+
+## Poststratify on age, gender, and household type
+
+These are the only variables in common that are eligilbe for the use for post stratification purposes.
+
+```{r}
+# switching some var names for plots
+complete.data <-complete.data %>%
+  mutate(part_gender = case_when(part_gender == "M" ~ "Male",
+                                 part_gender == "F" ~ "Female"),
+         hh_type = case_when(hh_type == 1 ~ "Not alone",
+                             hh_type == 0 ~ "Alone"),
+         senior = case_when(senior == 1 ~ "Senior",
+                             senior == 0 ~ "No senior")
+  )
+```
+
+```{r, warning = FALSE}
+# define survey design without weights
+svy.unweighted <- svydesign(ids=~part_id, data=complete.data)
+
+# get the postratification weights by age, gender, and household type
+uk_pop <- uk_pop %>%
+  mutate(part_gender = case_when(part_gender == "M" ~ "Male",
+                                 part_gender == "F" ~ "Female"),
+         hh_type = case_when(hh_type == 1 ~ "Not alone",
+                             hh_type == 0 ~ "Alone")) %>%
+  group_by(part_gender, part_age_group, hh_type) %>%
+  slice(rep(1:n(), each = pop_estimate))
+# create contingency table
+pop_data.dist <- xtabs(~part_gender+part_age_group+hh_type, data=uk_pop)
+# define post-stratification survey design
+svy.poststrat <- postStratify(design=svy.unweighted, 
+                              strata=~part_gender+part_age_group+hh_type,
+                              population=pop_data.dist)
+```
+
+## Running analyses with the svy weights
+
+```{r}
+glm.fit <- svyglm(contacts ~ part_age_group + part_gender + factor(hh_type) + date, design=svy.poststrat)
+glm.gov <- svyglm(contacts ~ stringency_index + cases_new + date, design=svy.poststrat)
+glm.age <- svyglm(contacts ~ part_age_group + date, design=svy.poststrat)
+glm.gender <- svyglm(contacts ~ part_gender + date, design=svy.poststrat)
+glm.hhtype <- svyglm(contacts ~ factor(hh_type) + date, design=svy.poststrat)
+glm.location <- svyglm(contacts ~ factor(location) + date, design=svy.poststrat)
+glm.periods <- svyglm(contacts ~ factor(periods) + date, design=svy.poststrat)
+glm.senior.gen <- svyglm(contacts ~ factor(senior)*part_gender + date, design=svy.poststrat)
+glm.senior.hh <- svyglm(contacts ~ factor(senior)*factor(hh_type) + date, design=svy.poststrat)
+```
+
+```{r}
+summary(glm.fit)
+summary(glm.gov)
+summary(glm.age)
+summary(glm.gender)
+summary(glm.hhtype)
+summary(glm.location)
+summary(glm.senior.gen)
+summary(glm.senior.hh)
+```
+
+## Datasets needed for plotting with/wo Survey design
+
+These seperated data sets are all needed to obtain the plots!
+
+```{r}
+# contacts (with and w/o poststratification)
+data.wgt <- svyby(~contacts, ~weeks, design=svy.poststrat, svymean)
+data.wgt <- data.wgt %>%
+  mutate(wgt = 0)
+
+data.non.wgt <- svyby(~contacts, ~weeks, design=svy.unweighted, svymean)
+data.non.wgt <- data.non.wgt %>%
+  mutate(wgt = 1)
+
+data.weeks <- rbind(data.wgt, data.non.wgt)
+```
+
+```{r}
+# contacts by age group (with and w/o poststratification)
+data.age.wgt <- svyby(~contacts, ~part_age_group+weeks, design=svy.poststrat, svymean)
+data.age.wgt <- data.age.wgt %>%
+  mutate(wgt = 0)
+
+data.age.non.wgt <- svyby(~contacts, ~part_age_group+weeks, design=svy.unweighted, svymean)
+data.age.non.wgt <- data.age.non.wgt %>%
+  mutate(wgt = 1)
+
+data.age.weeks <- rbind(data.age.wgt, data.age.non.wgt)
+```
+
+```{r}
+# contacts by gender (with and w/o poststratification)
+data.gender.wgt <- svyby(~contacts, ~part_gender+weeks,design=svy.poststrat, svymean)
+data.gender.wgt <- data.gender.wgt %>%
+  mutate(wgt = 0)
+
+data.gender.non.wgt <- svyby(~contacts, ~part_gender+weeks, design=svy.unweighted, svymean)
+data.gender.non.wgt <- data.gender.non.wgt %>%
+  mutate(wgt = 1)
+
+data.gender.weeks <- rbind(data.gender.wgt, data.gender.non.wgt)
+```
+
+```{r}
+# contacts by household type (with and w/o poststratification)
+data.hhtype.wgt <- svyby(~contacts, ~hh_type+weeks, design=svy.poststrat, svymean)
+data.hhtype.wgt <- data.hhtype.wgt %>%
+  mutate(wgt = 0)
+
+data.hhtype.non.wgt <- svyby(~contacts, ~hh_type+weeks, design=svy.unweighted, svymean)
+data.hhtype.non.wgt <- data.hhtype.non.wgt %>%
+  mutate(wgt = 1)
+
+data.hhtype.weeks <- rbind(data.hhtype.wgt, data.hhtype.non.wgt)
+```
+
+```{r}
+# contacts of 65 year olds and over by gender (with and w/o poststratification)
+data.seniors.wgt <- svyby(~contacts, ~senior+part_gender+weeks, design=svy.poststrat, svymean)
+data.seniors.wgt <- data.seniors.wgt %>%
+  mutate(wgt = 0)
+
+data.seniors.non.wgt <- svyby(~contacts, ~senior+part_gender+weeks, design=svy.unweighted, svymean)
+data.seniors.non.wgt <- data.seniors.non.wgt %>%
+  mutate(wgt = 1)
+
+data.seniors.weeks <- rbind(data.seniors.wgt, data.seniors.non.wgt)
+```
+
+```{r}
+# contacts of 65 year olds and over by household type (with and w/o 
+# poststratification)
+data.seniors.hh.wgt <- svyby(~contacts, ~senior+hh_type+weeks, design=svy.poststrat, svymean)
+data.seniors.hh.wgt <- data.seniors.hh.wgt %>%
+  mutate(wgt = 0)
+
+data.seniors.hh.non.wgt <- svyby(~contacts, ~senior+hh_type+weeks, design=svy.unweighted, svymean)
+data.seniors.hh.non.wgt <- data.seniors.hh.non.wgt %>%
+  mutate(wgt = 1)
+
+data.seniors.hh <- rbind(data.seniors.hh.wgt, data.seniors.hh.non.wgt)
+```
+
+```{r}
+# cases per week
+cases.weeks <- subset(complete.data, select=c(weeks, cases_new))
+cases.weeks <- cases.weeks %>%
+  group_by(weeks) %>%
+  mutate(cases = mean(cases_new)) %>%
+  distinct(weeks, .keep_all=TRUE)
+```
+
+
+```{r}
+# for Shiny app
+write.csv(cases.weeks,"Shiny App/data/cases.weeks.csv")
+write.csv(data.seniors.hh,"Shiny App/data/data.seniors.hh.csv")
+write.csv(data.seniors.weeks,"Shiny App/data/data.seniors.weeks.csv")
+write.csv(data.hhtype.weeks,"Shiny App/data/data.hhtype.weeks.csv")
+write.csv(data.gender.weeks,"Shiny App/data/data.gender.weeks.csv")
+write.csv(data.age.weeks,"Shiny App/data/data.age.weeks.csv")
+write.csv(data.weeks,"Shiny App/data/data.weeks.csv")
+```
+
+```{r}
+source("Functions/plotting_post_strat.R")
+source("Functions/plotting_with_Covid.R")
+```
+
+```{r, warning=FALSE}
+p1 <- plotting_post(data.weeks,data.weeks$wgt,"Figure 1: Contacts over Time")
+p2 <- plotting_post(data.age.weeks,data.age.weeks$part_age_group,"Figure 2: Contacts by Age Group")
+p3 <- plotting_post(data.gender.weeks,data.gender.weeks$part_gender,"Figure 3: Contacts by Gender")
+p4 <- plotting_post(data.hhtype.weeks,data.hhtype.weeks$hh_type,"Figure 4: Contacts by Household Typ")
+p5 <- plotting_post(data.seniors.weeks,interaction(factor(data.seniors.weeks$senior), data.seniors.weeks$part_gender),"Figure 5: Contacts by Age Group and Gender")
+p6 <- plotting_post(data.seniors.hh,interaction(factor(data.seniors.hh$senior), data.seniors.hh$hh_type),"Figure 6: Contacts by Age Group and Household Type")
+
+
+p7 <- plotting_covid(data.weeks,data.weeks$wgt,"Figure 1: Contacts over Time")
+p8 <- plotting_covid(data.age.weeks,data.age.weeks$part_age_group,"Figure 2: Contacts by Age Group")
+p9 <- plotting_covid(data.gender.weeks,data.gender.weeks$part_gender,"Figure 3: Contacts by Gender")
+p10 <- plotting_covid(data.hhtype.weeks,data.hhtype.weeks$hh_type,"Figure 4: Contacts by Household Typ")
+p11 <- plotting_covid(data.seniors.weeks,interaction(factor(data.seniors.weeks$senior), data.seniors.weeks$part_gender),"Figure 5: Contacts by Age Group and Gender")
+p12 <- plotting_covid(data.seniors.hh,interaction(factor(data.seniors.hh$senior), data.seniors.hh$hh_type),"Figure 6: Contacts by Age Group and Household Type")
+```
+
+
+
+
+
+
+
+
+

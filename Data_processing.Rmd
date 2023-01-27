@@ -1,0 +1,200 @@
+---
+title: "Data_processing"
+author: "Christoph Völtzke"
+date: "2023-01-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load required libraries 
+```{r, results = "hide", message=FALSE, warning=FALSE}
+library(tidyverse)
+library(covidregionaldata)
+library(socialmixr)
+```
+
+
+## Loading all relevant data sets
+```{r,results = "hide", message=FALSE, warning=FALSE}
+cont_com <- read.csv("Data/CoMix_uk_contact_common.csv")
+hh_xtr <- read.csv("Data/CoMix_uk_hh_extra.csv")
+part_com <- read.csv("Data/CoMix_uk_participant_common.csv")
+sday <- read.csv("Data/CoMix_uk_sday.csv")
+load("Data/uk_pop.Rdata") # df saved as uk_pop
+stringency.index <- read.csv("Data/covid-stringency-index.csv")
+```
+
+## Comix data cleaned
+```{r}
+# Get the number of contacts per person per day
+clean_cont <- merge(cont_com, sday,by=("part_id")) 
+clean_cont <- clean_cont %>%# remove empty entries
+  subset(!is.na(cnt_gender) & cnt_age_est_min != 0) %>%
+  mutate(contact = 1,
+         cnt_home = replace(cnt_home, cnt_home == "TRUE", 1),
+         cnt_work = replace(cnt_work, cnt_work == "TRUE", 1),
+         cnt_school = replace(cnt_school, cnt_school == "TRUE", 1),
+         cnt_transport = replace(cnt_transport, cnt_transport == "TRUE", 1),
+         cnt_leisure = replace(cnt_leisure, cnt_leisure == "TRUE", 1),
+         cnt_otherplace = replace(cnt_otherplace, cnt_otherplace == "TRUE", 1)) %>%
+  group_by(part_id) %>%
+  #get total sum of contacts + per location + phys/non-phys
+  mutate(contacts = sum(contact, na.rm = TRUE),
+         home = sum(cnt_home, na.rm = TRUE),
+         work = sum(cnt_work, na.rm = TRUE),
+         school = sum(cnt_school, na.rm = TRUE),
+         transport = sum(cnt_transport, na.rm = TRUE),
+         leisure = sum(cnt_leisure, na.rm = TRUE),
+         otherplace = sum(cnt_otherplace, na.rm = TRUE),
+         physical_contact = sum(phys_contact == 1),
+         non_physical_contact = sum(phys_contact == 2)) %>%
+  select(-contact)
+```
+
+```{r}
+# Set age categories
+clean_part <- merge(clean_cont, part_com, by=("part_id"))
+clean_part <- clean_part %>%
+  distinct(part_id, .keep_all = TRUE) %>% #remove duplicates 
+  mutate(part_age_group = cut(part_age,
+    breaks = c(0, 17, 24, 44, 64, 120),
+    labels = c("0-17", "18-24", "25-44", "45-64", "65 and over")))
+
+# Create variable to indicate single-person households
+hh_xtr <- hh_xtr %>%
+  mutate(hh_type = case_when(
+    hh_type == "Live alone" ~ 0,
+    hh_type != "Live alone" ~ 1))
+
+clean_part <- merge(clean_part, hh_xtr, by=c("hh_id"))
+```
+
+## Stringency of government measures
+```{r}
+stringency.index <- subset(stringency.index, stringency.index$Code == "GBR")
+# Add date information in correct format
+stringency.index$sday_id <- as.Date(stringency.index$Day)
+stringency.index$date <- as.character(as.Date(stringency.index$Day))
+stringency2 <- subset(stringency.index, select=c("date","stringency_index"))
+```
+
+## Covid Cases in UK
+```{r}
+cases_tot <- get_national_data(countries = "UK")
+cases <- subset(cases_tot, select=c("date","cases_new"))
+cases$date <- as.character(as.Date(cases$date))
+```
+##  Merge accquired information into one dataset
+```{r}
+# merge participant data and population data
+complete.data <- merge(clean_part, uk_pop,by=c("part_age_group","part_gender", "hh_type"))
+complete.data <- complete.data %>%
+  mutate(date = as.character(as.Date(sday_id, "%Y.%m.%d"),"%Y-%m-%d"))
+
+# add cases and stringency information
+complete.data <- merge(complete.data, cases, by=c("date"))
+complete.data <- merge(complete.data, stringency2, by=c("date"))
+# remove participants not part of our analysis scope
+complete.data <- subset(complete.data, part_gender != c("other") & 
+                        part_age_group != c("0-17"))
+```
+
+
+## Last cleaning full data
+```{r}
+complete.data <- complete.data %>%
+  mutate(weeks = case_when(
+    date >= "2020-03-23" & date <= "2020-03-29" ~ 13,
+    date >= "2020-03-30" & date <= "2020-04-05" ~ 14,
+    date >= "2020-04-06" & date <= "2020-04-12" ~ 15,
+    date >= "2020-04-13" & date <= "2020-04-19" ~ 16,
+    date >= "2020-04-20" & date <= "2020-04-26" ~ 17,
+    date >= "2020-04-27" & date <= "2020-05-03" ~ 18,
+    date >= "2020-05-04" & date <= "2020-05-10" ~ 19,
+    date >= "2020-05-11" & date <= "2020-05-17" ~ 20,
+    date >= "2020-05-18" & date <= "2020-05-24" ~ 21,
+    date >= "2020-05-25" & date <= "2020-05-31" ~ 22,
+    date >= "2020-06-01" & date <= "2020-06-07" ~ 23,
+    date >= "2020-06-08" & date <= "2020-06-14" ~ 24,
+    date >= "2020-06-15" & date <= "2020-06-21" ~ 25,
+    date >= "2020-06-22" & date <= "2020-06-28" ~ 26,
+    date >= "2020-06-29" & date <= "2020-07-05" ~ 27,
+    date >= "2020-07-06" & date <= "2020-07-12" ~ 28,
+    date >= "2020-07-13" & date <= "2020-07-19" ~ 29,
+    date >= "2020-07-20" & date <= "2020-07-26" ~ 30,
+    date >= "2020-07-27" & date <= "2020-08-02" ~ 31,
+    date >= "2020-08-03" ~ 32),
+    senior = case_when(
+    part_age_group != "65 and over" ~ 0,
+    part_age_group == "65 and over" ~ 1),
+    periods = case_when( 
+    date >= "2020-03-23" & date <= "2020-06-03" ~ "Lockdown_1",
+    date >= "2020-06-04" & date <= "2020-07-29" ~ "Lockdown_1_ease",
+    date >= "2020-07-30" ~ "Reduced_restrictions"),
+    location = case_when(
+      cnt_home == 1 ~ "Home",
+      cnt_work == 1 ~ "Work",
+      cnt_school == 1 ~ "School",
+      cnt_transport == 1 ~ "Transport",
+      cnt_leisure == 1 ~ "Leisure",
+      cnt_otherplace == 1 ~ "Otherplace")
+    )
+```
+
+## Polymod data - Social Contacts before COVID-19 pandemic
+
+```{r}
+# Dataset for contacts
+clean_cont_poly <- merge(polymod$participants, polymod$contacts, by=("part_id"))
+clean_cont_poly <- clean_cont_poly %>%
+  # select only relevant participants
+  filter(part_age >= 18) %>%
+  filter(part_gender == "M" | part_gender == "F") %>%
+  filter(country == "United Kingdom") %>%
+  # create location columns
+  mutate(contact = 1,
+         cnt_home = replace(cnt_home, cnt_home == "TRUE", 1),
+         cnt_work = replace(cnt_work, cnt_work == "TRUE", 1),
+         cnt_school = replace(cnt_school, cnt_school == "TRUE", 1),
+         cnt_transport = replace(cnt_transport, cnt_transport == "TRUE", 1),
+         cnt_leisure = replace(cnt_leisure, cnt_leisure == "TRUE", 1),
+         cnt_otherplace = replace(cnt_otherplace, cnt_otherplace == "TRUE", 1),
+         hh_type = case_when(
+           hh_size > 1 ~ "Two or more person household",
+           hh_size == 1 ~ "Single person household")) %>%
+  group_by(part_id) %>%
+  #get total sum of contacts + per location + phys/non-phys
+  mutate(contacts = sum(contact, na.rm = TRUE),
+         home = sum(cnt_home, na.rm = TRUE),
+         work = sum(cnt_work, na.rm = TRUE),
+         school = sum(cnt_school, na.rm = TRUE),
+         transport = sum(cnt_transport, na.rm = TRUE),
+         leisure = sum(cnt_leisure, na.rm = TRUE),
+         otherplace = sum(cnt_otherplace, na.rm = TRUE),
+         physical_contact = sum(phys_contact == 1),
+         non_physical_contact = sum(phys_contact == 2),
+         part_age_group = cut(part_age,
+                              breaks = c(18, 24, 44, 64, 120),
+                              labels = c("18-24", "25-44", "45-64", "65 and over"))) %>%
+  select(-contact)
+```
+
+```{r}
+# dataset for participants
+clean_part_poly <- clean_cont_poly %>%
+ distinct(part_id, .keep_all = TRUE)
+```
+
+## Save all data frames as csv files
+
+```{r}
+write.csv(complete.data,"Data/Data_processed/full_data.csv")
+write.csv(clean_cont,"Data/Data_processed/clean_cont.csv")
+write.csv(clean_part,"Data/Data_processed/clean_part.csv")
+write.csv(clean_cont_poly,"Data/Data_processed/polymod_contacts.csv")
+write.csv(clean_part_poly,"Data/Data_processed/polymod_parts.csv")
+```
+
