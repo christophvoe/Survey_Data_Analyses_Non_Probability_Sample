@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r, results = "hide", message=FALSE, warning=FALSE, echo=FALSE}
-source("Manuscripts/Code_only.R")
+source("Functions/Code_only.R")
 ```
 
 ```{r, results = "hide", message=FALSE, warning=FALSE, echo=FALSE}
